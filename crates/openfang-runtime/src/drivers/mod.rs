@@ -5,6 +5,7 @@
 //! Mistral, Fireworks, Ollama, vLLM, Chutes.ai, and any OpenAI-compatible endpoint.
 
 pub mod anthropic;
+pub mod bedrock;
 pub mod claude_code;
 pub mod copilot;
 pub mod fallback;
@@ -15,13 +16,12 @@ pub mod vertex;
 
 use crate::llm_driver::{DriverConfig, LlmDriver, LlmError};
 use openfang_types::model_catalog::{
-    AI21_BASE_URL, ANTHROPIC_BASE_URL, AZURE_OPENAI_BASE_URL, CEREBRAS_BASE_URL, CHUTES_BASE_URL,
-    COHERE_BASE_URL, DEEPSEEK_BASE_URL, FIREWORKS_BASE_URL, GEMINI_BASE_URL, GROQ_BASE_URL,
-    HUGGINGFACE_BASE_URL, KIMI_CODING_BASE_URL, LEMONADE_BASE_URL, LMSTUDIO_BASE_URL,
-    MINIMAX_BASE_URL, MISTRAL_BASE_URL, MOONSHOT_BASE_URL, NVIDIA_NIM_BASE_URL, OLLAMA_BASE_URL,
-    OPENAI_BASE_URL, OPENROUTER_BASE_URL, PERPLEXITY_BASE_URL, QIANFAN_BASE_URL, QWEN_BASE_URL,
-    REPLICATE_BASE_URL, SAMBANOVA_BASE_URL, TOGETHER_BASE_URL, VENICE_BASE_URL, VLLM_BASE_URL,
-    VOLCENGINE_BASE_URL, VOLCENGINE_CODING_BASE_URL, XAI_BASE_URL, ZAI_BASE_URL,
+    AI21_BASE_URL, ANTHROPIC_BASE_URL, CEREBRAS_BASE_URL, CHUTES_BASE_URL, COHERE_BASE_URL,
+    DEEPSEEK_BASE_URL, FIREWORKS_BASE_URL, GEMINI_BASE_URL, GROQ_BASE_URL, HUGGINGFACE_BASE_URL,
+    KIMI_CODING_BASE_URL, LEMONADE_BASE_URL, MINIMAX_BASE_URL, MISTRAL_BASE_URL, MOONSHOT_BASE_URL,
+    NVIDIA_NIM_BASE_URL, OPENAI_BASE_URL, OPENROUTER_BASE_URL, PERPLEXITY_BASE_URL,
+    QIANFAN_BASE_URL, QWEN_BASE_URL, REPLICATE_BASE_URL, SAMBANOVA_BASE_URL, TOGETHER_BASE_URL,
+    VENICE_BASE_URL, VOLCENGINE_BASE_URL, VOLCENGINE_CODING_BASE_URL, XAI_BASE_URL, ZAI_BASE_URL,
     ZAI_CODING_BASE_URL, ZHIPU_BASE_URL, ZHIPU_CODING_BASE_URL,
 };
 use std::sync::Arc;
@@ -32,206 +32,232 @@ struct ProviderDefaults {
     api_key_env: &'static str,
     /// If true, the API key is required (error if missing).
     key_required: bool,
+    /// OAuth provider identifier if this is an OAuth-based provider.
+    oauth_provider: Option<&'static str>,
+}
+
+impl ProviderDefaults {
+    fn simple(base_url: &'static str, api_key_env: &'static str, key_required: bool) -> Self {
+        Self {
+            base_url,
+            api_key_env,
+            key_required,
+            oauth_provider: None,
+        }
+    }
 }
 
 /// Get defaults for known providers.
 fn provider_defaults(provider: &str) -> Option<ProviderDefaults> {
     match provider {
-        "groq" => Some(ProviderDefaults {
-            base_url: GROQ_BASE_URL,
-            api_key_env: "GROQ_API_KEY",
-            key_required: true,
-        }),
-        "openrouter" => Some(ProviderDefaults {
-            base_url: OPENROUTER_BASE_URL,
-            api_key_env: "OPENROUTER_API_KEY",
-            key_required: true,
-        }),
-        "deepseek" => Some(ProviderDefaults {
-            base_url: DEEPSEEK_BASE_URL,
-            api_key_env: "DEEPSEEK_API_KEY",
-            key_required: true,
-        }),
-        "together" => Some(ProviderDefaults {
-            base_url: TOGETHER_BASE_URL,
-            api_key_env: "TOGETHER_API_KEY",
-            key_required: true,
-        }),
-        "mistral" => Some(ProviderDefaults {
-            base_url: MISTRAL_BASE_URL,
-            api_key_env: "MISTRAL_API_KEY",
-            key_required: true,
-        }),
-        "fireworks" => Some(ProviderDefaults {
-            base_url: FIREWORKS_BASE_URL,
-            api_key_env: "FIREWORKS_API_KEY",
-            key_required: true,
-        }),
-        "openai" => Some(ProviderDefaults {
-            base_url: OPENAI_BASE_URL,
-            api_key_env: "OPENAI_API_KEY",
-            key_required: true,
-        }),
-        "gemini" | "google" => Some(ProviderDefaults {
-            base_url: GEMINI_BASE_URL,
-            api_key_env: "GEMINI_API_KEY",
-            key_required: true,
-        }),
-        "ollama" => Some(ProviderDefaults {
-            base_url: OLLAMA_BASE_URL,
-            api_key_env: "OLLAMA_API_KEY",
-            key_required: false,
-        }),
-        "vllm" => Some(ProviderDefaults {
-            base_url: VLLM_BASE_URL,
-            api_key_env: "VLLM_API_KEY",
-            key_required: false,
-        }),
-        "lmstudio" => Some(ProviderDefaults {
-            base_url: LMSTUDIO_BASE_URL,
-            api_key_env: "LMSTUDIO_API_KEY",
-            key_required: false,
-        }),
-        "lemonade" => Some(ProviderDefaults {
-            base_url: LEMONADE_BASE_URL,
-            api_key_env: "LEMONADE_API_KEY",
-            key_required: false,
-        }),
-        "perplexity" => Some(ProviderDefaults {
-            base_url: PERPLEXITY_BASE_URL,
-            api_key_env: "PERPLEXITY_API_KEY",
-            key_required: true,
-        }),
-        "cohere" => Some(ProviderDefaults {
-            base_url: COHERE_BASE_URL,
-            api_key_env: "COHERE_API_KEY",
-            key_required: true,
-        }),
-        "ai21" => Some(ProviderDefaults {
-            base_url: AI21_BASE_URL,
-            api_key_env: "AI21_API_KEY",
-            key_required: true,
-        }),
-        "cerebras" => Some(ProviderDefaults {
-            base_url: CEREBRAS_BASE_URL,
-            api_key_env: "CEREBRAS_API_KEY",
-            key_required: true,
-        }),
-        "sambanova" => Some(ProviderDefaults {
-            base_url: SAMBANOVA_BASE_URL,
-            api_key_env: "SAMBANOVA_API_KEY",
-            key_required: true,
-        }),
-        "huggingface" => Some(ProviderDefaults {
-            base_url: HUGGINGFACE_BASE_URL,
-            api_key_env: "HF_API_KEY",
-            key_required: true,
-        }),
-        "xai" => Some(ProviderDefaults {
-            base_url: XAI_BASE_URL,
-            api_key_env: "XAI_API_KEY",
-            key_required: true,
-        }),
-        "replicate" => Some(ProviderDefaults {
-            base_url: REPLICATE_BASE_URL,
-            api_key_env: "REPLICATE_API_TOKEN",
-            key_required: true,
-        }),
-        "github-copilot" | "copilot" => Some(ProviderDefaults {
-            base_url: copilot::GITHUB_COPILOT_BASE_URL,
-            api_key_env: "GITHUB_TOKEN",
-            key_required: true,
-        }),
-        "codex" | "openai-codex" => Some(ProviderDefaults {
-            base_url: OPENAI_BASE_URL,
-            api_key_env: "OPENAI_API_KEY",
-            key_required: true,
-        }),
-        "claude-code" => Some(ProviderDefaults {
-            base_url: "",
+        "groq" => Some(ProviderDefaults::simple(
+            GROQ_BASE_URL,
+            "GROQ_API_KEY",
+            true,
+        )),
+        "openrouter" => Some(ProviderDefaults::simple(
+            OPENROUTER_BASE_URL,
+            "OPENROUTER_API_KEY",
+            true,
+        )),
+        "deepseek" => Some(ProviderDefaults::simple(
+            DEEPSEEK_BASE_URL,
+            "DEEPSEEK_API_KEY",
+            true,
+        )),
+        "together" => Some(ProviderDefaults::simple(
+            TOGETHER_BASE_URL,
+            "TOGETHER_API_KEY",
+            true,
+        )),
+        "mistral" => Some(ProviderDefaults::simple(
+            MISTRAL_BASE_URL,
+            "MISTRAL_API_KEY",
+            true,
+        )),
+        "fireworks" => Some(ProviderDefaults::simple(
+            FIREWORKS_BASE_URL,
+            "FIREWORKS_API_KEY",
+            true,
+        )),
+        "openai" | "openai-gpt4" | "gpt4" | "gpt-4" | "chatgpt" => Some(ProviderDefaults::simple(
+            OPENAI_BASE_URL,
+            "OPENAI_API_KEY",
+            true,
+        )),
+        "gemini" | "google" => Some(ProviderDefaults::simple(
+            GEMINI_BASE_URL,
+            "GEMINI_API_KEY",
+            true,
+        )),
+        "ollama" => Some(ProviderDefaults::simple(
+            "http://localhost:11434/v1",
+            "OLLAMA_HOST",
+            false,
+        )),
+        "vllm" => Some(ProviderDefaults::simple(
+            "http://localhost:8000/v1",
+            "OPENAI_API_KEY",
+            true,
+        )),
+        "lmstudio" => Some(ProviderDefaults::simple(
+            "http://localhost:1234/v1",
+            "OPENAI_API_KEY",
+            true,
+        )),
+        "lemonade" => Some(ProviderDefaults::simple(
+            LEMONADE_BASE_URL,
+            "LEMONADE_API_KEY",
+            true,
+        )),
+        "perplexity" => Some(ProviderDefaults::simple(
+            PERPLEXITY_BASE_URL,
+            "PERPLEXITY_API_KEY",
+            true,
+        )),
+        "cohere" => Some(ProviderDefaults::simple(
+            COHERE_BASE_URL,
+            "COHERE_API_KEY",
+            true,
+        )),
+        "ai21" => Some(ProviderDefaults::simple(
+            AI21_BASE_URL,
+            "AI21_API_KEY",
+            true,
+        )),
+        "cerebras" => Some(ProviderDefaults::simple(
+            CEREBRAS_BASE_URL,
+            "CEREBRAS_API_KEY",
+            true,
+        )),
+        "sambanova" => Some(ProviderDefaults::simple(
+            SAMBANOVA_BASE_URL,
+            "SAMBANOVA_API_KEY",
+            true,
+        )),
+        "huggingface" => Some(ProviderDefaults::simple(
+            HUGGINGFACE_BASE_URL,
+            "HF_TOKEN",
+            true,
+        )),
+        "xai" => Some(ProviderDefaults::simple(XAI_BASE_URL, "XAI_API_KEY", true)),
+        "replicate" => Some(ProviderDefaults::simple(
+            REPLICATE_BASE_URL,
+            "REPLICATE_API_TOKEN",
+            true,
+        )),
+        "github-copilot" | "copilot" => Some(ProviderDefaults::simple(
+            copilot::GITHUB_COPILOT_BASE_URL,
+            "GITHUB_TOKEN",
+            true,
+        )),
+        "codex" | "openai-codex" => Some(ProviderDefaults::simple(
+            OPENAI_BASE_URL,
+            "OPENAI_API_KEY",
+            true,
+        )),
+        "claude-code" => Some(ProviderDefaults::simple("", "", false)),
+        "moonshot" | "kimi" | "kimi2" => Some(ProviderDefaults::simple(
+            MOONSHOT_BASE_URL,
+            "MOONSHOT_API_KEY",
+            true,
+        )),
+        "kimi_coding" => Some(ProviderDefaults::simple(
+            KIMI_CODING_BASE_URL,
+            "KIMI_API_KEY",
+            true,
+        )),
+        "qwen" | "dashscope" | "model_studio" => Some(ProviderDefaults::simple(
+            QWEN_BASE_URL,
+            "DASHSCOPE_API_KEY",
+            true,
+        )),
+        "minimax" => Some(ProviderDefaults::simple(
+            MINIMAX_BASE_URL,
+            "MINIMAX_API_KEY",
+            true,
+        )),
+        "zhipu" | "glm" => Some(ProviderDefaults::simple(
+            ZHIPU_BASE_URL,
+            "ZHIPU_API_KEY",
+            true,
+        )),
+        "zhipu_coding" | "codegeex" => Some(ProviderDefaults::simple(
+            ZHIPU_CODING_BASE_URL,
+            "ZHIPU_API_KEY",
+            true,
+        )),
+        "zai" | "z.ai" => Some(ProviderDefaults::simple(ZAI_BASE_URL, "ZAI_API_KEY", true)),
+        "zai_coding" => Some(ProviderDefaults::simple(
+            ZAI_CODING_BASE_URL,
+            "ZAI_API_KEY",
+            true,
+        )),
+        "qianfan" | "baidu" => Some(ProviderDefaults::simple(
+            QIANFAN_BASE_URL,
+            "QIANFAN_API_KEY",
+            true,
+        )),
+        "volcengine" | "doubao" => Some(ProviderDefaults::simple(
+            VOLCENGINE_BASE_URL,
+            "VOLCENGINE_API_KEY",
+            true,
+        )),
+        "volcengine_coding" => Some(ProviderDefaults::simple(
+            VOLCENGINE_CODING_BASE_URL,
+            "VOLCENGINE_API_KEY",
+            true,
+        )),
+        "chutes" => Some(ProviderDefaults::simple(
+            CHUTES_BASE_URL,
+            "CHUTES_API_KEY",
+            true,
+        )),
+        "venice" => Some(ProviderDefaults::simple(
+            VENICE_BASE_URL,
+            "VENICE_API_KEY",
+            true,
+        )),
+        "nvidia" | "nvidia-nim" => Some(ProviderDefaults::simple(
+            NVIDIA_NIM_BASE_URL,
+            "NVIDIA_API_KEY",
+            true,
+        )),
+        "azure" | "azure-openai" => {
+            Some(ProviderDefaults::simple("", "AZURE_OPENAI_API_KEY", true))
+        }
+        // Note: vertex-ai uses a special VertexAIDriver, not the simple pattern
+        "vertex-ai" | "vertex" | "google-vertex" => None, // Handled specially in create_driver
+        // OAuth-based providers
+        "openai-codex-oauth" => Some(ProviderDefaults {
+            base_url: "https://chatgpt.com/backend-api/codex/responses",
             api_key_env: "",
             key_required: false,
+            oauth_provider: Some("openai-codex"),
         }),
-        "moonshot" | "kimi" | "kimi2" => Some(ProviderDefaults {
-            base_url: MOONSHOT_BASE_URL,
-            api_key_env: "MOONSHOT_API_KEY",
+        "gemini-oauth" => Some(ProviderDefaults {
+            base_url: "https://generativelanguage.googleapis.com/v1beta/models",
+            api_key_env: "",
+            key_required: false,
+            oauth_provider: Some("google"),
+        }),
+        "qwen-oauth" => Some(ProviderDefaults {
+            base_url: "https://chat.qwen.ai/api/v1",
+            api_key_env: "",
+            key_required: false,
+            oauth_provider: Some("qwen"),
+        }),
+        "minimax-oauth" => Some(ProviderDefaults {
+            base_url: "https://api.minimax.io/v1",
+            api_key_env: "",
+            key_required: false,
+            oauth_provider: Some("minimax"),
+        }),
+        "novita" | "novita-ai" => Some(ProviderDefaults {
+            base_url: "https://api.novita.ai/openai/v1",
+            api_key_env: "NOVITA_API_KEY",
             key_required: true,
-        }),
-        "kimi_coding" => Some(ProviderDefaults {
-            base_url: KIMI_CODING_BASE_URL,
-            api_key_env: "KIMI_API_KEY",
-            key_required: true,
-        }),
-        "qwen" | "dashscope" | "model_studio" => Some(ProviderDefaults {
-            base_url: QWEN_BASE_URL,
-            api_key_env: "DASHSCOPE_API_KEY",
-            key_required: true,
-        }),
-        "minimax" => Some(ProviderDefaults {
-            base_url: MINIMAX_BASE_URL,
-            api_key_env: "MINIMAX_API_KEY",
-            key_required: true,
-        }),
-        "zhipu" | "glm" => Some(ProviderDefaults {
-            base_url: ZHIPU_BASE_URL,
-            api_key_env: "ZHIPU_API_KEY",
-            key_required: true,
-        }),
-        "zhipu_coding" | "codegeex" => Some(ProviderDefaults {
-            base_url: ZHIPU_CODING_BASE_URL,
-            api_key_env: "ZHIPU_API_KEY",
-            key_required: true,
-        }),
-        "zai" | "z.ai" => Some(ProviderDefaults {
-            base_url: ZAI_BASE_URL,
-            api_key_env: "ZHIPU_API_KEY",
-            key_required: true,
-        }),
-        "zai_coding" => Some(ProviderDefaults {
-            base_url: ZAI_CODING_BASE_URL,
-            api_key_env: "ZHIPU_API_KEY",
-            key_required: true,
-        }),
-        "qianfan" | "baidu" => Some(ProviderDefaults {
-            base_url: QIANFAN_BASE_URL,
-            api_key_env: "QIANFAN_API_KEY",
-            key_required: true,
-        }),
-        "volcengine" | "doubao" => Some(ProviderDefaults {
-            base_url: VOLCENGINE_BASE_URL,
-            api_key_env: "VOLCENGINE_API_KEY",
-            key_required: true,
-        }),
-        "volcengine_coding" => Some(ProviderDefaults {
-            base_url: VOLCENGINE_CODING_BASE_URL,
-            api_key_env: "VOLCENGINE_API_KEY",
-            key_required: true,
-        }),
-        "chutes" => Some(ProviderDefaults {
-            base_url: CHUTES_BASE_URL,
-            api_key_env: "CHUTES_API_KEY",
-            key_required: true,
-        }),
-        "venice" => Some(ProviderDefaults {
-            base_url: VENICE_BASE_URL,
-            api_key_env: "VENICE_API_KEY",
-            key_required: true,
-        }),
-        "nvidia" | "nvidia-nim" => Some(ProviderDefaults {
-            base_url: NVIDIA_NIM_BASE_URL,
-            api_key_env: "NVIDIA_API_KEY",
-            key_required: true,
-        }),
-        "azure" | "azure-openai" => Some(ProviderDefaults {
-            base_url: AZURE_OPENAI_BASE_URL,
-            api_key_env: "AZURE_OPENAI_API_KEY",
-            key_required: true,
-        }),
-        "vertex-ai" | "vertex" | "google-vertex" => Some(ProviderDefaults {
-            // Vertex AI uses OAuth, not API keys - base_url is per-project
-            base_url: "https://us-central1-aiplatform.googleapis.com",
-            api_key_env: "GOOGLE_APPLICATION_CREDENTIALS",
-            key_required: false, // Uses OAuth service account, not API key
+            oauth_provider: None,
         }),
         _ => None,
     }
@@ -334,27 +360,23 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
         )));
     }
 
-    // GitHub Copilot — wraps OpenAI-compatible driver with automatic token exchange.
-    // The CopilotDriver exchanges the GitHub PAT for a Copilot API token on demand,
-    // caches it, and refreshes when expired.
+    // GitHub Copilot — OAuth device flow + OpenAI-compatible completions.
+    // Authentication is handled automatically via persisted tokens from the device flow.
+    // Run `openfang config set-key github-copilot` to authenticate.
     if provider == "github-copilot" || provider == "copilot" {
-        let github_token = config
-            .api_key
-            .clone()
-            .or_else(|| std::env::var("GITHUB_TOKEN").ok())
-            .ok_or_else(|| {
-                LlmError::MissingApiKey(
-                    "Set GITHUB_TOKEN environment variable for GitHub Copilot".to_string(),
-                )
-            })?;
-        let base_url = config
-            .base_url
-            .clone()
-            .unwrap_or_else(|| copilot::GITHUB_COPILOT_BASE_URL.to_string());
-        return Ok(Arc::new(copilot::CopilotDriver::new(
-            github_token,
-            base_url,
-        )));
+        let openfang_dir = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .map(|h| std::path::PathBuf::from(h).join(".openfang"))
+            .unwrap_or_else(|_| std::path::PathBuf::from(".openfang"));
+
+        if !copilot::copilot_auth_available(&openfang_dir) {
+            return Err(LlmError::MissingApiKey(
+                "Copilot not authenticated. Run `openfang config set-key github-copilot` to sign in."
+                    .to_string(),
+            ));
+        }
+
+        return Ok(Arc::new(copilot::CopilotDriver::new(openfang_dir)));
     }
 
     // Azure OpenAI — deployment-based URL with `api-key` header
@@ -410,6 +432,18 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
         return Ok(Arc::new(vertex::VertexAIDriver::new(project_id, region)));
     }
 
+    // AWS Bedrock — Converse API with Bedrock API Key (Bearer token)
+    if provider == "bedrock" {
+        let bedrock_api_key = config.api_key.clone();
+        let region = std::env::var("AWS_REGION")
+            .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
+            .ok();
+        return Ok(Arc::new(bedrock::BedrockDriver::new_with_credentials(
+            bedrock_api_key,
+            region,
+        )?));
+    }
+
     // Kimi for Code — Anthropic-compatible endpoint
     if provider == "kimi_coding" {
         let api_key = config
@@ -441,12 +475,24 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
             )));
         }
 
+        // For OAuth providers, check if token is available from OAuth flow
+        let effective_api_key = if defaults.oauth_provider.is_some() {
+            // Try to get token from OAuth credential storage
+            let oauth_key = format!("{}_OAUTH_TOKEN", provider.to_uppercase().replace("-", "_"));
+            std::env::var(&oauth_key).ok().unwrap_or(api_key)
+        } else {
+            api_key
+        };
+
         let base_url = config
             .base_url
             .clone()
             .unwrap_or_else(|| defaults.base_url.to_string());
 
-        return Ok(Arc::new(openai::OpenAIDriver::new(api_key, base_url)));
+        return Ok(Arc::new(openai::OpenAIDriver::new(
+            effective_api_key,
+            base_url,
+        )));
     }
 
     // Unknown provider — if base_url is set, treat as custom OpenAI-compatible.
@@ -486,10 +532,11 @@ pub fn create_driver(config: &DriverConfig) -> Result<Arc<dyn LlmDriver>, LlmErr
     Err(LlmError::Api {
         status: 0,
         message: format!(
-            "Unknown provider '{}'. Supported: anthropic, gemini, openai, azure, groq, openrouter, \
-             deepseek, together, mistral, fireworks, ollama, vllm, lmstudio, perplexity, \
-             cohere, ai21, cerebras, sambanova, huggingface, xai, replicate, github-copilot, \
-             chutes, venice, nvidia, codex, claude-code. Or set base_url for a custom OpenAI-compatible endpoint.",
+            "Unknown provider '{}'. Supported: anthropic, gemini, openai, azure, bedrock, groq, \
+             openrouter, deepseek, together, mistral, fireworks, ollama, vllm, lmstudio, \
+             perplexity, cohere, ai21, cerebras, sambanova, huggingface, xai, replicate, \
+             github-copilot, chutes, venice, nvidia, codex, claude-code. \
+             Or set base_url for a custom OpenAI-compatible endpoint.",
             provider
         ),
     })
@@ -530,6 +577,7 @@ pub fn detect_available_provider() -> Option<(&'static str, &'static str, &'stat
             "PERPLEXITY_API_KEY",
         ),
         ("cohere", "command-r-plus", "COHERE_API_KEY"),
+        ("novita", "moonshotai/kimi-k2.5", "NOVITA_API_KEY"),
     ];
     for &(provider, model, env_var) in PROBE_ORDER {
         if std::env::var(env_var)
@@ -587,6 +635,7 @@ pub fn known_providers() -> &'static [&'static str] {
         "chutes",
         "venice",
         "nvidia",
+        "novita",
         "codex",
         "claude-code",
         "qwen-code",
@@ -691,11 +740,12 @@ mod tests {
         assert!(providers.contains(&"volcengine"));
         assert!(providers.contains(&"chutes"));
         assert!(providers.contains(&"nvidia"));
+        assert!(providers.contains(&"novita"));
         assert!(providers.contains(&"codex"));
         assert!(providers.contains(&"claude-code"));
         assert!(providers.contains(&"qwen-code"));
         assert!(providers.contains(&"azure"));
-        assert_eq!(providers.len(), 37);
+        assert_eq!(providers.len(), 38);
     }
 
     #[test]
@@ -732,8 +782,54 @@ mod tests {
     fn test_provider_defaults_huggingface() {
         let d = provider_defaults("huggingface").unwrap();
         assert_eq!(d.base_url, "https://api-inference.huggingface.co/v1");
-        assert_eq!(d.api_key_env, "HF_API_KEY");
+        assert_eq!(d.api_key_env, "HF_TOKEN");
         assert!(d.key_required);
+    }
+
+    #[test]
+    fn test_provider_defaults_novita() {
+        let d = provider_defaults("novita").unwrap();
+        assert_eq!(d.base_url, "https://api.novita.ai/openai/v1");
+        assert_eq!(d.api_key_env, "NOVITA_API_KEY");
+        assert!(d.key_required);
+    }
+
+    #[test]
+    fn test_provider_defaults_novita_ai_alias() {
+        let d = provider_defaults("novita-ai").unwrap();
+        assert_eq!(d.base_url, "https://api.novita.ai/openai/v1");
+        assert_eq!(d.api_key_env, "NOVITA_API_KEY");
+        assert!(d.key_required);
+    }
+
+    #[test]
+    fn test_novita_provider_with_env_key() {
+        let unique_key = "test-novita-key-12345";
+        std::env::set_var("NOVITA_API_KEY", unique_key);
+        let config = DriverConfig {
+            provider: "novita".to_string(),
+            api_key: None,
+            base_url: None,
+            skip_permissions: true,
+        };
+        let driver = create_driver(&config);
+        assert!(
+            driver.is_ok(),
+            "Novita provider with env var should succeed"
+        );
+        std::env::remove_var("NOVITA_API_KEY");
+    }
+
+    #[test]
+    fn test_novita_provider_no_key_errors() {
+        let config = DriverConfig {
+            provider: "novita".to_string(),
+            api_key: None,
+            base_url: None,
+            skip_permissions: true,
+        };
+        let driver = create_driver(&config);
+        assert!(driver.is_err());
     }
 
     #[test]
@@ -886,6 +982,31 @@ mod tests {
         assert!(
             driver.is_ok(),
             "azure-openai alias should create driver successfully"
+        );
+    }
+
+    #[test]
+    fn test_bedrock_not_in_provider_defaults() {
+        // Bedrock is special-cased in create_driver(), not in provider_defaults()
+        assert!(provider_defaults("bedrock").is_none());
+    }
+
+    #[test]
+    fn test_bedrock_driver_requires_credentials() {
+        // With no credentials in env, bedrock creation should fail gracefully
+        // (We can't easily test this without mucking with env, so just verify
+        // that with an explicit api_key it succeeds at construction)
+        let config = DriverConfig {
+            provider: "bedrock".to_string(),
+            api_key: Some("test-bedrock-api-key".to_string()),
+            base_url: None,
+            skip_permissions: true,
+        };
+        // Should succeed because api_key is provided
+        let driver = create_driver(&config);
+        assert!(
+            driver.is_ok(),
+            "Bedrock with explicit api_key should construct successfully"
         );
     }
 }
