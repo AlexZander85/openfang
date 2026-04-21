@@ -18,7 +18,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.5.7"
+version = "0.5.9"
 edition = "2021"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/RightNow-AI/openfang"
@@ -168,3 +168,4 @@ lto = "thin"
 codegen-units = 8
 opt-level = 2
 strip = false
+
