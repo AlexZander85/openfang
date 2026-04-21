@@ -125,6 +125,7 @@ pub async fn build_router(
         } else {
             String::new()
         },
+        allow_no_auth: state.kernel.config.auth.allow_no_auth,
     };
     let gcra_limiter = rate_limiter::create_rate_limiter();
 

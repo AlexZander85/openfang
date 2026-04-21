@@ -834,6 +834,7 @@ async fn start_test_server_with_auth(api_key: &str) -> TestServer {
         } else {
             String::new()
         },
+        allow_no_auth: state.kernel.config.auth.allow_no_auth,
     };
 
     let app = Router::new()

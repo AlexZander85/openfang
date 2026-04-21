@@ -1166,6 +1166,10 @@ pub struct AuthConfig {
     pub password_hash: String,
     /// Session token lifetime in hours (default: 168 = 7 days).
     pub session_ttl_hours: u64,
+    /// Allow unauthenticated access when no API key is configured.
+    /// Defaults to true for backward compatibility, but set to false
+    /// in production to require explicit auth configuration.
+    pub allow_no_auth: bool,
 }
 
 impl Default for AuthConfig {
@@ -1175,6 +1179,7 @@ impl Default for AuthConfig {
             username: "admin".to_string(),
             password_hash: String::new(),
             session_ttl_hours: 168,
+            allow_no_auth: true,
         }
     }
 }

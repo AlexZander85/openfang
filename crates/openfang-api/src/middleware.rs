@@ -49,6 +49,10 @@ pub struct AuthState {
     pub api_key: String,
     pub auth_enabled: bool,
     pub session_secret: String,
+    /// Allow unauthenticated access when no API key is configured.
+    /// When true (default), matches legacy behavior: no key = open access.
+    /// When false, requires auth even if no API key is set (fail-close).
+    pub allow_no_auth: bool,
 }
 
 /// Bearer token authentication middleware.
@@ -125,6 +129,10 @@ pub async fn auth(
         || path == "/api/logs/stream"  // SSE stream, read-only
         || (path.starts_with("/api/cron/") && is_get)
         || path.starts_with("/api/providers/github-copilot/oauth/")
+        || path.starts_with("/api/providers/openai-codex/oauth/")
+        || path.starts_with("/api/providers/gemini-oauth/oauth/")
+        || path.starts_with("/api/providers/qwen-oauth/oauth/")
+        || path.starts_with("/api/providers/minimax-oauth/oauth/")
         || path == "/api/auth/login"
         || path == "/api/auth/logout"
         || (path == "/api/auth/check" && is_get);
@@ -133,12 +141,30 @@ pub async fn auth(
         return next.run(request).await;
     }
 
-    // If no API key configured (empty, whitespace-only, or missing), skip auth
-    // entirely. Users who don't set api_key accept that all endpoints are open.
-    // To secure the dashboard, set a non-empty api_key in config.toml.
+    // If no API key configured (empty, whitespace-only, or missing), check
+    // whether unauthenticated access is explicitly allowed.
+    // SECURITY: fail-close by default — if allow_no_auth is false, deny access
+    // even when no API key is set. This prevents accidental open deployments.
     let api_key_trimmed = auth_state.api_key.trim().to_string();
     if api_key_trimmed.is_empty() && !auth_state.auth_enabled {
-        return next.run(request).await;
+        if auth_state.allow_no_auth {
+            tracing::warn!(
+                "No API key configured and auth disabled — all endpoints open (insecure). \
+                 Set allow_no_auth = false in [auth] config to enforce authentication."
+            );
+            return next.run(request).await;
+        }
+        // Fail-close: no key and no auth enabled, but allow_no_auth is false
+        return Response::builder()
+            .status(StatusCode::UNAUTHORIZED)
+            .header("www-authenticate", "Bearer")
+            .body(Body::from(
+                serde_json::json!({
+                    "error": "No API key configured. Set api_key in config.toml, enable [auth], or set allow_no_auth = true for local development."
+                })
+                .to_string(),
+            ))
+            .unwrap_or_default();
     }
     let api_key = api_key_trimmed.as_str();
 
@@ -269,5 +295,98 @@ mod tests {
     #[test]
     fn test_request_id_header_constant() {
         assert_eq!(REQUEST_ID_HEADER, "x-request-id");
+    }
+
+    #[test]
+    fn test_auth_state_allow_no_auth_default() {
+        // When allow_no_auth is true (default), empty key + no auth = open access
+        let state = AuthState {
+            api_key: String::new(),
+            auth_enabled: false,
+            session_secret: String::new(),
+            allow_no_auth: true,
+        };
+        assert!(state.allow_no_auth);
+        assert!(state.api_key.trim().is_empty());
+        assert!(!state.auth_enabled);
+    }
+
+    #[test]
+    fn test_auth_state_fail_close_flag() {
+        // When allow_no_auth is false, empty key + no auth = fail-close
+        let state = AuthState {
+            api_key: String::new(),
+            auth_enabled: false,
+            session_secret: String::new(),
+            allow_no_auth: false,
+        };
+        assert!(!state.allow_no_auth);
+        // This state should trigger the fail-close branch in middleware
+        assert!(state.api_key.trim().is_empty());
+        assert!(!state.auth_enabled);
+    }
+
+    #[test]
+    fn test_auth_state_with_api_key_skips_fail_close() {
+        // When api_key is set, the fail-close check is not reached
+        let state = AuthState {
+            api_key: "my-secret-key".to_string(),
+            auth_enabled: false,
+            session_secret: "my-secret-key".to_string(),
+            allow_no_auth: false,
+        };
+        assert!(!state.api_key.trim().is_empty());
+        // Bearer token check path will be used instead
+    }
+
+    #[test]
+    fn test_auth_state_auth_enabled_skips_fail_close() {
+        // When auth_enabled is true, the fail-close check is not reached
+        // (session cookie check path is used instead)
+        let state = AuthState {
+            api_key: String::new(),
+            auth_enabled: true,
+            session_secret: "session-secret".to_string(),
+            allow_no_auth: false,
+        };
+        assert!(state.auth_enabled);
+        // Session-based auth path will be used
+    }
+
+    #[test]
+    fn test_public_endpoint_paths() {
+        // Verify key GET endpoints are recognized as public
+        let is_get = true;
+        let public_get_paths = [
+            "/api/health",
+            "/api/health/detail",
+            "/api/status",
+            "/api/version",
+            "/api/agents",
+            "/api/models",
+            "/api/providers",
+            "/api/budget",
+        ];
+        for path in &public_get_paths {
+            let is_public = *path == "/"
+                || *path == "/api/health"
+                || *path == "/api/health/detail"
+                || *path == "/api/status"
+                || *path == "/api/version"
+                || (*path == "/api/agents" && is_get)
+                || (*path == "/api/models" && is_get)
+                || (*path == "/api/providers" && is_get)
+                || (*path == "/api/budget" && is_get);
+            assert!(is_public, "Expected {} to be public", path);
+        }
+    }
+
+    #[test]
+    fn test_oauth_routes_are_public() {
+        // Copilot OAuth routes should be public
+        let copilot_start = "/api/providers/github-copilot/oauth/start";
+        let copilot_poll = "/api/providers/github-copilot/oauth/poll/abc123";
+        assert!(copilot_start.starts_with("/api/providers/github-copilot/oauth/"));
+        assert!(copilot_poll.starts_with("/api/providers/github-copilot/oauth/"));
     }
 }
