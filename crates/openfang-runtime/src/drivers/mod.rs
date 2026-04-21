@@ -149,7 +149,7 @@ fn provider_defaults(provider: &str) -> Option<ProviderDefaults> {
         "github-copilot" | "copilot" => Some(ProviderDefaults::simple(
             copilot::GITHUB_COPILOT_BASE_URL,
             "GITHUB_TOKEN",
-            true,
+            false,
         )),
         "codex" | "openai-codex" => Some(ProviderDefaults::simple(
             OPENAI_BASE_URL,
@@ -227,7 +227,11 @@ fn provider_defaults(provider: &str) -> Option<ProviderDefaults> {
             Some(ProviderDefaults::simple("", "AZURE_OPENAI_API_KEY", true))
         }
         // Note: vertex-ai uses a special VertexAIDriver, not the simple pattern
-        "vertex-ai" | "vertex" | "google-vertex" => None, // Handled specially in create_driver
+        "vertex-ai" | "vertex" | "google-vertex" => Some(ProviderDefaults::simple(
+            "",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            true,
+        )),
         // OAuth-based providers
         "openai-codex-oauth" => Some(ProviderDefaults {
             base_url: "https://chatgpt.com/backend-api/codex/responses",
@@ -921,6 +925,49 @@ mod tests {
         assert_eq!(d.api_key_env, "AZURE_OPENAI_API_KEY");
         assert!(d.key_required);
     }
+
+    #[test]
+    fn test_provider_defaults_github_copilot() {
+        let d = provider_defaults("github-copilot").unwrap();
+        assert_eq!(d.api_key_env, "GITHUB_TOKEN");
+        assert!(!d.key_required);
+    }
+
+    #[test]
+fn test_provider_defaults_vertex_ai() {
+    let d = provider_defaults("vertex-ai").unwrap();
+    assert_eq!(d.base_url, "");
+    assert_eq!(d.api_key_env, "GOOGLE_APPLICATION_CREDENTIALS");
+    assert!(d.key_required);
+}
+
+#[test]
+fn test_provider_defaults_openai_codex_oauth() {
+    let d = provider_defaults("openai-codex-oauth").unwrap();
+    assert!(!d.key_required);
+    assert_eq!(d.oauth_provider, Some("openai-codex"));
+}
+
+#[test]
+fn test_provider_defaults_gemini_oauth() {
+    let d = provider_defaults("gemini-oauth").unwrap();
+    assert!(!d.key_required);
+    assert_eq!(d.oauth_provider, Some("google"));
+}
+
+#[test]
+fn test_provider_defaults_qwen_oauth() {
+    let d = provider_defaults("qwen-oauth").unwrap();
+    assert!(!d.key_required);
+    assert_eq!(d.oauth_provider, Some("qwen"));
+}
+
+#[test]
+fn test_provider_defaults_minimax_oauth() {
+    let d = provider_defaults("minimax-oauth").unwrap();
+    assert!(!d.key_required);
+    assert_eq!(d.oauth_provider, Some("minimax"));
+}
 
     #[test]
     fn test_azure_driver_creation_with_key_and_url() {
